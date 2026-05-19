@@ -7,6 +7,7 @@ Create Date: 2026-05-19
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from pgvector.sqlalchemy import Vector
 
 revision = "0001"
 down_revision = None
@@ -45,11 +46,8 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
         ),
         sa.Column("event_json", postgresql.JSONB, nullable=False),
-        sa.Column(sa.Column("cause_embedding", sa.Text).key, sa.Text),
+        sa.Column("cause_embedding", Vector(384)),
     )
-
-    op.execute("ALTER TABLE events DROP COLUMN cause_embedding")
-    op.execute("ALTER TABLE events ADD COLUMN cause_embedding vector(384)")
 
     op.create_index("events_operator_created", "events", ["operator_id", "created_at"])
     op.create_index("events_outcome", "events", ["outcome_tag"])

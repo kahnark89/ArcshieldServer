@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, text
-from app.database import get_db
+from app.database import get_db, AsyncSessionLocal
 from app.models.event import Event
 from app.schemas.ciaer_event import CiaerPlusEvent
 from app.schemas.api_responses import (
@@ -46,19 +46,20 @@ def _extract_event_fields(event: CiaerPlusEvent) -> dict:
     }
 
 
-async def _compute_and_store_embedding(event_id: uuid.UUID, cause_description: str, db: AsyncSession):
+async def _compute_and_store_embedding(event_id: uuid.UUID, cause_description: str):
     if not embedding_service.is_ready():
         return
-    try:
-        vector = await embedding_service.embed(cause_description)
-        vector_str = "[" + ",".join(str(v) for v in vector) + "]"
-        await db.execute(
-            text("UPDATE events SET cause_embedding = :vec::vector WHERE event_id = :eid"),
-            {"vec": vector_str, "eid": str(event_id)},
-        )
-        await db.commit()
-    except Exception:
-        pass
+    async with AsyncSessionLocal() as db:
+        try:
+            vector = await embedding_service.embed(cause_description)
+            vector_str = "[" + ",".join(str(v) for v in vector) + "]"
+            await db.execute(
+                text("UPDATE events SET cause_embedding = :vec::vector WHERE event_id = :eid"),
+                {"vec": vector_str, "eid": str(event_id)},
+            )
+            await db.commit()
+        except Exception:
+            await db.rollback()
 
 
 @router.post("", status_code=201, response_model=EventIngestResponse)
@@ -76,7 +77,6 @@ async def ingest_event(
         _compute_and_store_embedding,
         db_event.event_id,
         event.cause.description,
-        AsyncSession(db.get_bind()),
     )
 
     return EventIngestResponse(event_id=str(db_event.event_id), status="stored")
